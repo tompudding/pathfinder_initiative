@@ -87,7 +87,7 @@ def scan_initiative(pid, maps):
             init = vmaccess.vm_read(pid, pos-0x1, 0x1)
             matches.append((pos - 1, ord(init), map))
             
-    print 'Have %d matches for initiative needle' % len(matches)
+    #print 'Have %d matches for initiative needle' % len(matches)
     #for offset in xrange(0x84, 0x85, 4):
     offset = 0x84
     for pos,init,src_map in matches:
@@ -95,30 +95,21 @@ def scan_initiative(pid, maps):
         needle = struct.pack('<I',pos - offset)
         for map in maps:
             references.extend([ref for ref in map.scan(needle)])
-        if len(references) == 0:
+        if len(references) != 2:
             continue
-        dumper = vmaccess.vm_read(pid, references[0] -0x400, 0x800)
-        #dump(dumper, references[0])
-        for dump_pos in xrange(0,len(dumper),4):
-            word = struct.unpack('<I',dumper[dump_pos:dump_pos+4])[0]
-            if word < 0x8000:
-                continue
-            try:
-                mem = vmaccess.vm_read(pid, word - 0x400, 0x800)
-            except RuntimeError:
-                continue
-            target = 'Brottor Strakeln'
-            #target = 'Arkrhyst'
-            if target in mem:
-                p = mem.index(target)
-                print 'Bingo bingo %x %x %s' % (dump_pos-0x400,p-0x400,mem[p-40:p+len(target)+10])
-            
+
+        name_ptr = vmaccess.vm_read(pid, references[0] - 0x478, 4)
+        name_ptr = struct.unpack('<I',name_ptr)[0]
+        if name_ptr < 0x8000:
+            continue
+        name = vmaccess.vm_read(pid, name_ptr, 128)
+        name = [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
             
         region = vmaccess.vm_read(pid, pos-0x84, 0x100)
         # with open('/tmp/bin.bin','ab') as f:
         #     f.write(region)
         order = struct.unpack('<I',region[0x40:0x44])[0]
-        print '%08x init=%2d pos=%d: %s' % (pos - offset, init, order, ' '.join(['%08x' % r for r in references]))
+        print 'init=%2d pos=%d name=%s' % (init, order, name)
 
 def scan_name(pid, maps):
     import binascii

@@ -98,12 +98,21 @@ def scan_initiative(pid, maps):
         if len(references) != 2:
             continue
 
-        name_ptr = vmaccess.vm_read(pid, references[0] - 0x478, 4)
-        name_ptr = struct.unpack('<I',name_ptr)[0]
-        if name_ptr < 0x8000:
-            continue
-        name = vmaccess.vm_read(pid, name_ptr, 128)
-        name = [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
+        name = 'unknown'
+        for ref in references:
+            name_ptr = vmaccess.vm_read(pid, ref - 0x478, 4)
+            name_ptr = struct.unpack('<I',name_ptr)[0]
+            if name_ptr < 0x8000:
+                continue
+            try:
+                name = vmaccess.vm_read(pid, name_ptr, 128)
+            except RuntimeError:
+                continue
+            try:
+                name = [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
+            except:
+                continue
+            break
             
         region = vmaccess.vm_read(pid, pos-0x84, 0x100)
         # with open('/tmp/bin.bin','ab') as f:

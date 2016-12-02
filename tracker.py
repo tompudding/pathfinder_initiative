@@ -2,6 +2,8 @@ import vmaccess
 import os
 import glob
 import hashlib
+import time
+import struct
 
 class Perms(object):
     def __init__(self, perms_string):
@@ -10,11 +12,27 @@ class Perms(object):
         self.executable = perms_string[2] == 'x'
 
 class Region(object):
-    def __init__(self, start, end, perms, filename):
+    def __init__(self, pid, start, end, perms, filename):
+        self.pid = pid
         self.start = start
         self.end = end
         self.perms = perms
         self.filename = filename
+
+    def scan(self, needle):
+        try:
+            region = vmaccess.vm_read(self.pid, self.start, self.end - self.start)
+        except RuntimeError:
+            return
+        region_pos = 0
+        while region_pos < len(region):
+            try:
+                region_pos = region.index(needle, region_pos)
+            except ValueError:
+                break
+            #print hex(page + region_pos),hex(struct.unpack('<I',region[region_pos-1:region_pos+3])[0])
+            yield self.start + region_pos
+            region_pos += 1
         
 
 def maps(pid):
@@ -30,7 +48,7 @@ def maps(pid):
                 filename = ''
             start,end = (int(addr,16) for addr in addrs.split('-'))
             perms = Perms(perms)
-            yield Region(start, end, perms, filename)
+            yield Region(pid, start, end, perms, filename)
 
 def pidof(name):
     for cmdline in glob.glob('/proc/*/cmdline'):
@@ -49,24 +67,114 @@ def pidof(name):
             if name in data:
                 yield pid
 
-def scan_pid(pid, maps):
-    hashes = {}
-    changing_pages = set()
-    #Let's pull in each page in every map and hash it
-    for trial in xrange(1000):
+def dump(data, addr):
+    fmt = '%08x : ' + (' '.join(['%08x' for i in xrange(4)]))
+    pos = 0
+    while pos + 16 <= len(data):
+        print fmt % ((addr + pos,) + tuple(struct.unpack('<I',data[p:p+4])[0] for p in xrange(pos,pos+16,4)))
+        pos += 16
+
+    left = len(data) - pos
+    fmt = '%08x : ' + (' '.join(['%02x' for i in xrange(left)]))
+    print fmt % ((addr,) + tuple(ord(b) for b in data[pos:]))
+
+def scan_initiative(pid, maps):
+    #Scan the writable regions for the initiative signature
+    needle = '\x00\x00\x00' + struct.pack('<III',2**32-99,99,1)
+    matches = []
+    for map in maps:
+        for pos in map.scan(needle):
+            init = vmaccess.vm_read(pid, pos-0x1, 0x1)
+            matches.append((pos - 1, ord(init), map))
+            
+    print 'Have %d matches for initiative needle' % len(matches)
+    #for offset in xrange(0x84, 0x85, 4):
+    offset = 0x84
+    for pos,init,src_map in matches:
+        references = []
+        needle = struct.pack('<I',pos - offset)
         for map in maps:
-            for page in xrange(map.start, map.end, 0x100):
+            references.extend([ref for ref in map.scan(needle)])
+        if len(references) == 0:
+            continue
+        dumper = vmaccess.vm_read(pid, references[0] -0x400, 0x800)
+        #dump(dumper, references[0])
+        for dump_pos in xrange(0,len(dumper),4):
+            word = struct.unpack('<I',dumper[dump_pos:dump_pos+4])[0]
+            if word < 0x8000:
+                continue
+            try:
+                mem = vmaccess.vm_read(pid, word - 0x400, 0x800)
+            except RuntimeError:
+                continue
+            target = 'Brottor Strakeln'
+            #target = 'Arkrhyst'
+            if target in mem:
+                p = mem.index(target)
+                print 'Bingo bingo %x %x %s' % (dump_pos-0x400,p-0x400,mem[p-40:p+len(target)+10])
+            
+            
+        region = vmaccess.vm_read(pid, pos-0x84, 0x100)
+        # with open('/tmp/bin.bin','ab') as f:
+        #     f.write(region)
+        order = struct.unpack('<I',region[0x40:0x44])[0]
+        print '%08x init=%2d pos=%d: %s' % (pos - offset, init, order, ' '.join(['%08x' % r for r in references]))
+
+def scan_name(pid, maps):
+    import binascii
+    needle = 'Brottor Strakeln'.encode('utf-16')[2:]
+    print binascii.hexlify(needle)
+    for map in maps:
+        for pos in map.scan(needle):
+            print 'Brottor at %08x' % pos
+    
+def scan_pid(pid, maps):
+    matches = []
+    needle = '\x41\x00\x00\x00'
+    needle = '\xd8\x57\xad\x19'
+    candidates = {}
+    for map in maps:
+        for page in xrange(map.start, map.end, 0x1000):
+            try:
+                region = vmaccess.vm_read(pid, page, 0x1000)
+            except RuntimeError:
+                continue
+            region_pos = 0
+            while region_pos < len(region):
                 try:
-                    region = vmaccess.vm_read(pid, page, 0x100)
-                except RuntimeError:
-                    continue
-                hash = hashlib.md5(region).digest()
-                if page in hashes:
-                    if hashes[page] != hash:
-                        changing_pages.add(page)
-                else:
-                    hashes[page] = hash
-        print 'complete',len(hashes),len(changing_pages)
+                    region_pos = region.index(needle, region_pos)
+                except ValueError:
+                    break
+                print hex(page + region_pos),hex(struct.unpack('<I',region[region_pos-1:region_pos+3])[0])
+                matches.append((page + region_pos, map))
+                candidates[page+region_pos] = map
+                region_pos += 1
+    print 'complete',len(matches)
+
+    # candidates = {}
+    # done = False
+    # good_passes = 0
+    # while not done:
+    #     good_pass = False
+    #     for pos,map in matches:
+    #         val = vmaccess.vm_read(pid, pos, 0x4)
+    #         if val == '\x61\x00\x00\x00':
+    #             print 'BINGO %08x %08x-%08x %s' % (pos, map.start, map.end, map.filename) 
+    #             candidates[pos] = map
+    #             good_pass = True
+    #     if good_pass:
+    #         good_passes += 1
+    #     if good_passes > 6:
+    #         done = True
+    #     time.sleep(0.5)
+
+    #dump the memory around these candidates
+    for pos,map in candidates.iteritems():
+        base = (pos - 64)&0xfffffffc
+        region = vmaccess.vm_read(pid, base, 128)
+        dump(region, base)
+        print
+
             
 
 for pid in pidof('HeroLab.exe'):
@@ -78,7 +186,8 @@ for pid in pidof('HeroLab.exe'):
         return True
         
     writable_maps = [map for map in maps(pid) if is_candidate_map(map)]
-    for map in writable_maps:
-        print hex(map.start),hex(map.end),map.filename
+    #for map in writable_maps:
+    #    print hex(map.start),hex(map.end),map.filename
 
-    scan_pid(pid, writable_maps)
+    scan_initiative(pid, writable_maps)
+    #scan_name(pid, writable_maps)

@@ -33,7 +33,74 @@ class Region(object):
             #print hex(page + region_pos),hex(struct.unpack('<I',region[region_pos-1:region_pos+3])[0])
             yield self.start + region_pos
             region_pos += 1
+
+def parse_name(name):
+    if not name.startswith('{'):
+        raise ValueError()
+    return [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
         
+class Actor(object):
+    def __init__(self, pid, name_ptr, init_ptr, order_ptr):
+        self.pid       = pid
+        self.name_ptr  = name_ptr
+        self.init_ptr  = init_ptr
+        self.order_ptr = order_ptr
+        self.init      = None
+        self.order     = None
+        self.name      = None
+        self.refresh()
+
+    def refresh(self):
+        "Reload properties and return True if anything has changed"
+        init  = vmaccess.vm_read_word(self.pid, self.init_ptr)
+        order = vmaccess.vm_read_word(self.pid, self.order_ptr)
+        name_ptr = vmaccess.vm_read_word(self.pid, self.name_ptr)
+        name  = vmaccess.vm_read(self.pid, name_ptr, 128)
+        name  = parse_name(name)
+        if (self.init, self.order, self.name) != (init, order, name):
+            self.init, self.order, self.name = init, order, name
+            return True
+        return False
+
+    def __eq__(self, other):
+        if self.name != other.name:
+            return False
+        if self.init != other.init:
+            return False
+        if self.order != other.order:
+            return False
+
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __repr__(self):
+        return 'init=%2d order=%2d name=%s' % (self.init, self.order, self.name)
+
+class HeroData(object):
+    def __init__(self, pid, count_ptr, actors):
+        self.pid = pid
+        self.count_ptr = count_ptr
+        self.actors = sorted(actors, lambda x,y : cmp(y.init, x.init))
+
+    def __eq__(self, other):
+        if other == None:
+            return False
+        if len(self.actors) != len(other.actors):
+            return False
+
+        for a,b in zip(self.actors, other.actors):
+            if a != b:
+                return False
+            
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __repr__(self):
+        return '\n'.join(str(actor) for actor in self.actors)
 
 def maps(pid):
     with open('/proc/%d/maps' % pid, 'rb') as f:
@@ -84,24 +151,26 @@ def scan_initiative(pid, maps):
     matches = []
     for map in maps:
         for pos in map.scan(needle):
-            init = vmaccess.vm_read(pid, pos-0x1, 0x1)
-            matches.append((pos - 1, ord(init), map))
+            #print '%08x - %08x : %s' % (map.start, map.end, map.filename)
+            matches.append((pos - 1, map))
             
     #print 'Have %d matches for initiative needle' % len(matches)
     #for offset in xrange(0x84, 0x85, 4):
     offset = 0x84
-    for pos,init,src_map in matches:
+    total_estimates = set()
+    actors = []
+    for pos,src_map in matches:
         references = []
         needle = struct.pack('<I',pos - offset)
         for map in maps:
             references.extend([ref for ref in map.scan(needle)])
-        if len(references) != 2:
+
+        if len(references) < 2:
             continue
 
-        name = 'unknown'
         for ref in references:
-            name_ptr = vmaccess.vm_read(pid, ref - 0x478, 4)
-            name_ptr = struct.unpack('<I',name_ptr)[0]
+            name_ptr = vmaccess.vm_read_word(pid, ref - 0x478)
+
             if name_ptr < 0x8000:
                 continue
             try:
@@ -109,85 +178,61 @@ def scan_initiative(pid, maps):
             except RuntimeError:
                 continue
             try:
-                name = [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
+                name = parse_name(name)
             except:
                 continue
             break
+        else:
+            name = 'unknown'
+            name_ptr = None
+            ref = None
+
+        actor = Actor(pid       = pid,
+                      name_ptr  = ref - 0x478,
+                      init_ptr  = pos,
+                      order_ptr = pos - 0x44)
+        actors.append(actor)
             
-        region = vmaccess.vm_read(pid, pos-0x84, 0x100)
-        # with open('/tmp/bin.bin','ab') as f:
-        #     f.write(region)
-        order = struct.unpack('<I',region[0x40:0x44])[0]
-        print 'init=%2d pos=%d name=%s' % (init, order, name)
+        common  = vmaccess.vm_read_word(pid, pos-0x48)
+        num_ptr = vmaccess.vm_read_word(pid, common + 4) + 0x164
+        num = vmaccess.vm_read_word(pid, num_ptr)
+        total_estimates.add( (num_ptr, num) )
 
-def scan_name(pid, maps):
-    import binascii
-    needle = 'Brottor Strakeln'.encode('utf-16')[2:]
-    print binascii.hexlify(needle)
-    for map in maps:
-        for pos in map.scan(needle):
-            print 'Brottor at %08x' % pos
-    
-def scan_pid(pid, maps):
-    matches = []
-    needle = '\x41\x00\x00\x00'
-    needle = '\xd8\x57\xad\x19'
-    candidates = {}
-    for map in maps:
-        for page in xrange(map.start, map.end, 0x1000):
-            try:
-                region = vmaccess.vm_read(pid, page, 0x1000)
-            except RuntimeError:
-                continue
-            region_pos = 0
-            while region_pos < len(region):
-                try:
-                    region_pos = region.index(needle, region_pos)
-                except ValueError:
-                    break
-                print hex(page + region_pos),hex(struct.unpack('<I',region[region_pos-1:region_pos+3])[0])
-                matches.append((page + region_pos, map))
-                candidates[page+region_pos] = map
-                region_pos += 1
-    print 'complete',len(matches)
+    if len(total_estimates) != 1:
+        raise RuntimeError('Got more than one guess at the number of participants')
+    count_ptr, count = total_estimates.pop()
+    if len(actors) != count:
+        raise RuntimeError('Error, got %d actors but expected %d' % (len(actors), count))
 
-    # candidates = {}
-    # done = False
-    # good_passes = 0
-    # while not done:
-    #     good_pass = False
-    #     for pos,map in matches:
-    #         val = vmaccess.vm_read(pid, pos, 0x4)
-    #         if val == '\x61\x00\x00\x00':
-    #             print 'BINGO %08x %08x-%08x %s' % (pos, map.start, map.end, map.filename) 
-    #             candidates[pos] = map
-    #             good_pass = True
-    #     if good_pass:
-    #         good_passes += 1
-    #     if good_passes > 6:
-    #         done = True
-    #     time.sleep(0.5)
+    return HeroData(pid, count_ptr, actors)
 
-    #dump the memory around these candidates
-    for pos,map in candidates.iteritems():
-        base = (pos - 64)&0xfffffffc
-        region = vmaccess.vm_read(pid, base, 128)
-        dump(region, base)
-        print
+import time
 
-            
+pids = [pid for pid in pidof('HeroLab.exe')]
 
-for pid in pidof('HeroLab.exe'):
-    def is_candidate_map(map):
-        if not map.perms.writable:
-            return False
-        if '.dll' in map.filename.lower():
-            return False
-        return True
+if len(pids) != 1:
+    raise SystemExit('More than one Hero Lab!')
+
+def is_candidate_map(map):
+    if not map.perms.writable:
+        return False
+    if map.filename:
+        return False
+    return True
         
-    writable_maps = [map for map in maps(pid) if is_candidate_map(map)]
-    #for map in writable_maps:
-    #    print hex(map.start),hex(map.end),map.filename
 
-    scan_initiative(pid, writable_maps)
-    #scan_name(pid, writable_maps)
+last_data = None
+used_maps = []
+while True:
+    writable_maps = [map for map in maps(pid) if is_candidate_map(map)]
+
+    hero_data = scan_initiative(pid, writable_maps)
+
+    if hero_data != last_data:
+        print hero_data
+
+    last_data = hero_data
+
+    time.sleep(4)
+
+    

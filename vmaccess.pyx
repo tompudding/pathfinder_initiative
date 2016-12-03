@@ -2,6 +2,8 @@ from libc.stdint cimport uint8_t, uintptr_t
 from libc.stdlib cimport malloc, free
 from libc.errno cimport errno
 from libc.string cimport strerror
+import struct
+
 cdef extern from "sys/uio.h":
     struct iovec:
         void *iov_base
@@ -33,3 +35,6 @@ def vm_read(int pid, uintptr_t addr, int len):
         return mem[:len]
     finally:
         free(mem)
+
+def vm_read_word(pid, addr):
+    return struct.unpack('<I', vm_read(pid, addr, 4))[0]

@@ -11,13 +11,27 @@ class Perms(object):
         self.writable = perms_string[1] == 'w'
         self.executable = perms_string[2] == 'x'
 
+    def __eq__(self, other):
+        return self.readable == other.readable and self.writable == other.writable and self.executable == other.executable
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash((self.readable, self.writable, self.executable))
+
+    def __repr__(self):
+        return ''.join(letter if val else '.' for (letter,val) in (('r',self.readable),
+                                                                   ('w',self.writable),
+                                                                   ('x',self.executable)))
+
 class Region(object):
     def __init__(self, pid, start, end, perms, filename):
         self.pid = pid
         self.start = start
         self.end = end
         self.perms = perms
-        self.filename = filename
+        self.filename = filename.strip()
 
     def scan(self, needle):
         try:
@@ -34,31 +48,41 @@ class Region(object):
             yield self.start + region_pos
             region_pos += 1
 
+    def __eq__(self, other):
+        return self.start == other.start and self.end == other.end and self.perms == other.perms and self.filename == other.filename
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __repr__(self):
+        return '%08x - %08x : %s : %s' % (self.start, self.end, self.perms, self.filename)
+
+    def __hash__(self):
+        return hash((self.start, self.end, self.perms, self.filename))
+
 def parse_name(name):
     if not name.startswith('{'):
         raise ValueError()
-    return [part for part in name.split('}') if part[0] != '{'][0].split('\x00')[0]
+    out = [part for part in name.split('}') if part and part[0] != '{'][0].split('\x00')
+    return out[0]
         
 class Actor(object):
-    def __init__(self, pid, name_ptr, init_ptr, order_ptr):
+    def __init__(self, pid, name, init_ptr, order_ptr):
         self.pid       = pid
-        self.name_ptr  = name_ptr
+        self.name      = name
         self.init_ptr  = init_ptr
         self.order_ptr = order_ptr
-        self.init      = None
-        self.order     = None
-        self.name      = None
+        self.init = None
+        self.order = None
         self.refresh()
 
     def refresh(self):
         "Reload properties and return True if anything has changed"
         init  = vmaccess.vm_read_word(self.pid, self.init_ptr)
         order = vmaccess.vm_read_word(self.pid, self.order_ptr)
-        name_ptr = vmaccess.vm_read_word(self.pid, self.name_ptr)
-        name  = vmaccess.vm_read(self.pid, name_ptr, 128)
-        name  = parse_name(name)
-        if (self.init, self.order, self.name) != (init, order, name):
-            self.init, self.order, self.name = init, order, name
+        
+        if (self.init, self.order) != (init, order):
+            self.init, self.order = init, order
             return True
         return False
 
@@ -83,6 +107,16 @@ class HeroData(object):
         self.pid = pid
         self.count_ptr = count_ptr
         self.actors = sorted(actors, lambda x,y : cmp(y.init, x.init))
+
+    def scan_for_changes(self):
+        if vmaccess.vm_read_word(self.pid, self.count_ptr) != len(self.actors):
+            return True
+        updated = False
+        for actor in self.actors:
+            if actor.refresh():
+                updated = True
+
+        return updated
 
     def __eq__(self, other):
         if other == None:
@@ -145,14 +179,20 @@ def dump(data, addr):
     fmt = '%08x : ' + (' '.join(['%02x' for i in xrange(left)]))
     print fmt % ((addr,) + tuple(ord(b) for b in data[pos:]))
 
-def scan_initiative(pid, maps):
+def scan_initiative(pid, maps, bad_maps):
     #Scan the writable regions for the initiative signature
     needle = '\x00\x00\x00' + struct.pack('<III',2**32-99,99,1)
     matches = []
     for map in maps:
+        if map in bad_maps:
+            continue
+        count = 0
         for pos in map.scan(needle):
             #print '%08x - %08x : %s' % (map.start, map.end, map.filename)
             matches.append((pos - 1, map))
+            count += 1
+        if count == 0:
+            bad_maps.add(map)
             
     #print 'Have %d matches for initiative needle' % len(matches)
     #for offset in xrange(0x84, 0x85, 4):
@@ -174,31 +214,43 @@ def scan_initiative(pid, maps):
             if name_ptr < 0x8000:
                 continue
             try:
-                name = vmaccess.vm_read(pid, name_ptr, 128)
+                name_data = vmaccess.vm_read(pid, name_ptr, 4096)
             except RuntimeError:
                 continue
+            
             try:
-                name = parse_name(name)
+                name = parse_name(name_data)
             except:
                 continue
+            print name
+            if 'Tallin' in name:
+                with open('/tmp/tallin.bin','wb') as f:
+                    f.write(name_data)
+            try:
+                t = name_data.split('\x00')
+                print t[0],'::',t[13],'::',t[19],name_data.startswith('{text clrdisable}')
+            except:
+                pass
             break
         else:
             name = 'unknown'
-            name_ptr = None
-            ref = None
 
         actor = Actor(pid       = pid,
-                      name_ptr  = ref - 0x478,
+                      name      = name,
                       init_ptr  = pos,
                       order_ptr = pos - 0x44)
+
+        try:
+            common  = vmaccess.vm_read_word(pid, pos-0x48)
+            num_ptr = vmaccess.vm_read_word(pid, common + 4) + 0x164
+            num = vmaccess.vm_read_word(pid, num_ptr)
+        except RuntimeError:
+            continue
         actors.append(actor)
-            
-        common  = vmaccess.vm_read_word(pid, pos-0x48)
-        num_ptr = vmaccess.vm_read_word(pid, common + 4) + 0x164
-        num = vmaccess.vm_read_word(pid, num_ptr)
         total_estimates.add( (num_ptr, num) )
 
     if len(total_estimates) != 1:
+        print total_estimates
         raise RuntimeError('Got more than one guess at the number of participants')
     count_ptr, count = total_estimates.pop()
     if len(actors) != count:
@@ -219,20 +271,31 @@ def is_candidate_map(map):
     if map.filename:
         return False
     return True
-        
 
-last_data = None
-used_maps = []
-while True:
-    writable_maps = [map for map in maps(pid) if is_candidate_map(map)]
+def main():
+    last_data = None
+    bad_maps = set()
+    while True:
+        writable_maps = [map for map in maps(pid) if is_candidate_map(map) and not map in bad_maps]
 
-    hero_data = scan_initiative(pid, writable_maps)
+        print 'scanning %d maps, %d bad ones' % (len(writable_maps), len(bad_maps))
+        try:
+            hero_data = scan_initiative(pid, writable_maps, bad_maps)
+        except RuntimeError as e:
+            bad_maps = set()
+            continue
+        print 'scanned'
 
-    if hero_data != last_data:
-        print hero_data
+        if hero_data != last_data:
+            print hero_data
+            print
 
-    last_data = hero_data
+        last_data = hero_data
 
-    time.sleep(4)
+        while True:
+            if hero_data.scan_for_changes():
+                print 'change detected'
+                break
+            time.sleep(0.1)
 
-    
+main()

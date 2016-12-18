@@ -4,6 +4,7 @@ import glob
 import hashlib
 import time
 import struct
+import socket
 
 class Perms(object):
     def __init__(self, perms_string):
@@ -63,15 +64,20 @@ class Region(object):
 def parse_name(name):
     if not name.startswith('{'):
         raise ValueError()
+    selected = name.startswith('{text clrbright}')
+    gone = name.startswith('{text clrdisable}')
     out = [part for part in name.split('}') if part and part[0] != '{'][0].split('\x00')
-    return out[0]
+    return out[0],selected,gone
         
 class Actor(object):
-    def __init__(self, pid, name, init_ptr, order_ptr):
+    def __init__(self, pid, name, selected, gone, init_ptr, order_ptr, name_ptr):
         self.pid       = pid
         self.name      = name
+        self.selected  = selected
+        self.gone      = gone
         self.init_ptr  = init_ptr
         self.order_ptr = order_ptr
+        self.name_ptr  = name_ptr
         self.init = None
         self.order = None
         self.refresh()
@@ -80,9 +86,18 @@ class Actor(object):
         "Reload properties and return True if anything has changed"
         init  = vmaccess.vm_read_word(self.pid, self.init_ptr)
         order = vmaccess.vm_read_word(self.pid, self.order_ptr)
+        try:
+            name_data = vmaccess.vm_read(pid, self.name_ptr, 1024)
+        except RuntimeError:
+            return True
+
+        try:
+            name,selected,gone = parse_name(name_data)
+        except:
+            return True
         
-        if (self.init, self.order) != (init, order):
-            self.init, self.order = init, order
+        if (self.init, self.order, self.name, self.selected, self.gone) != (init, order, name, selected, gone):
+            self.init, self.order, self.name, self.selected, self.gone = init, order, name, selected, gone
             return True
         return False
 
@@ -93,6 +108,8 @@ class Actor(object):
             return False
         if self.order != other.order:
             return False
+        if self.selected != other.selected:
+            return False
 
         return True
 
@@ -100,13 +117,22 @@ class Actor(object):
         return not self.__eq__(other)
 
     def __repr__(self):
-        return 'init=%2d order=%2d name=%s' % (self.init, self.order, self.name)
+        if self.gone:
+            extra = '---'
+        elif self.selected:
+            extra = '***'
+        else:
+            extra = ''
+        return 'init=%2d order=%2d name=%s %s' % (self.init, self.order, self.name, extra )
 
 class HeroData(object):
     def __init__(self, pid, count_ptr, actors):
         self.pid = pid
         self.count_ptr = count_ptr
-        self.actors = sorted(actors, lambda x,y : cmp(y.init, x.init))
+        self.actors = sorted(actors, lambda x,y : cmp(x.order, y.order))
+        gone = [actor for actor in self.actors if actor.gone]
+        not_gone = [actor for actor in self.actors if not actor.gone]
+        self.actors = gone + not_gone
 
     def scan_for_changes(self):
         if vmaccess.vm_read_word(self.pid, self.count_ptr) != len(self.actors):
@@ -117,6 +143,23 @@ class HeroData(object):
                 updated = True
 
         return updated
+
+    def send(self):
+        for i, actor in enumerate(self.actors):
+            if actor.selected:
+                break
+        else:
+            i = 0xff
+        chosen = i
+        buffer = chr(chosen) + '\x00'.join( (actor.name for actor in self.actors))
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #now connect to the web server on port 80
+        # - the normal http port
+        s.connect(("127.0.0.1", 4919))
+        s.send(buffer)
+        s.close()
+        
+
 
     def __eq__(self, other):
         if other == None:
@@ -199,6 +242,7 @@ def scan_initiative(pid, maps, bad_maps):
     offset = 0x84
     total_estimates = set()
     actors = []
+
     for pos,src_map in matches:
         references = []
         needle = struct.pack('<I',pos - offset)
@@ -214,31 +258,36 @@ def scan_initiative(pid, maps, bad_maps):
             if name_ptr < 0x8000:
                 continue
             try:
-                name_data = vmaccess.vm_read(pid, name_ptr, 4096)
+                name_data = vmaccess.vm_read(pid, name_ptr, 1024)
             except RuntimeError:
                 continue
-            
+
             try:
-                name = parse_name(name_data)
+                name,selected,gone = parse_name(name_data)
             except:
                 continue
-            print name
-            if 'Tallin' in name:
-                with open('/tmp/tallin.bin','wb') as f:
-                    f.write(name_data)
-            try:
-                t = name_data.split('\x00')
-                print t[0],'::',t[13],'::',t[19],name_data.startswith('{text clrdisable}')
-            except:
-                pass
+            #print name,selected
+            # if 'Tallin' in name:
+            #     with open('/tmp/tallin.bin','wb') as f:
+            #         f.write(name_data)
+            # try:
+            #     t = name_data.split('\x00')
+            #     print t[0],'::',t[13],'::',t[19],name_data.startswith('{text clrdisable}')
+            # except:
+            #     pass
             break
         else:
             name = 'unknown'
+            selected = False
+            gone = False
 
         actor = Actor(pid       = pid,
                       name      = name,
+                      selected  = selected,
+                      gone      = gone,
                       init_ptr  = pos,
-                      order_ptr = pos - 0x44)
+                      order_ptr = pos - 0x44,
+                      name_ptr  = name_ptr)
 
         try:
             common  = vmaccess.vm_read_word(pid, pos-0x48)
@@ -268,8 +317,8 @@ if len(pids) != 1:
 def is_candidate_map(map):
     if not map.perms.writable:
         return False
-    if map.filename:
-        return False
+    #if map.filename:
+    #    return False
     return True
 
 def main():
@@ -288,6 +337,7 @@ def main():
 
         if hero_data != last_data:
             print hero_data
+            hero_data.send()
             print
 
         last_data = hero_data
@@ -296,6 +346,6 @@ def main():
             if hero_data.scan_for_changes():
                 print 'change detected'
                 break
-            time.sleep(0.1)
+            time.sleep(1)
 
 main()

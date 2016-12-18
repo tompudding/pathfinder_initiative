@@ -10,6 +10,8 @@ class PlayerData(ui.UIElement):
     unselected = (0, 0, 0.4, 1.0)
     selected = (1, 0.5, 0, 1)
     def __init__(self, parent, pos, tr, name):
+        if not name:
+            name = 'unknown'
         self.name = name
         super(PlayerData, self).__init__( parent, pos, tr )
         self.box = ui.Box(self, Point(0,self.margin.y), Point(1,1.0 - self.margin.y), colour=self.unselected)
@@ -37,7 +39,7 @@ class PlayerData(ui.UIElement):
         self.text.SetColour(self.selected)
 
     def Destroy(self):
-        self.box.Destroy()
+        self.box.Delete()
         
 
 class GameView(ui.RootElement):
@@ -53,7 +55,8 @@ class GameView(ui.RootElement):
         #skip titles for development of the main game
         #self.box = ui.Box(self, Point(0.1,0.1), Point(0.8,0.8), colour=(1,0,0,1))
         self.items = []
-        self.set_items(['bilbo baggins','jim bob','tobia funke']*2, 1)
+        self.chosen = None
+        self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 0)
 
     def set_items(self, name_list, chosen):
         self.clear_items()
@@ -71,12 +74,16 @@ class GameView(ui.RootElement):
                                name)
             self.items.append(entry)
 
+        if chosen >= len(self.items):
+            chosen = len(self.items) - 1
+
         self.chosen = chosen
         self.items[chosen].select()
         
     def clear_items(self):
         for item in self.items:
             item.Destroy()
+        self.items = []
 
     def Draw(self):
         drawing.ResetState()

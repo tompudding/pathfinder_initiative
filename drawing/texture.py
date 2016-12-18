@@ -242,6 +242,8 @@ class TextManager(object):
         """
         How big would the text be if drawn on a single row in the given size?
         """
+        if not text:
+            return 0
         sizes = [self.atlas.Subimage(char).size*scale*global_scale for char in text]
         out = Point(sum(item.x for item in sizes),max(item.y for item in sizes))
         return out

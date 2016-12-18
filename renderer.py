@@ -5,6 +5,9 @@ import globals
 import drawing
 import view
 import time
+import socket
+import threading
+import SocketServer
 from globals.types import Point
 
 def Init():
@@ -37,9 +40,37 @@ def Init():
 
     globals.text_manager = drawing.texture.TextManager()
 
+
+class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
+    def handle(self):
+        data = self.request.recv(1024)
+        #First there should be a single byte which is the selected number
+        if not data:
+            return
+        chosen = ord(data[0])
+        names = data[1:].split('\x00')
+        print 'got',names,chosen
+        new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen })
+        pygame.event.post(new_event)
+
+
+class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
+    pass
+
 def main():
     """Main loop for the game"""
     Init()
+
+    server = ThreadedTCPServer(('0.0.0.0', 4919), ThreadedTCPRequestHandler)
+    ip, port = server.server_address
+
+    # Start a thread with the server -- that thread will then start one
+    # more thread for each request
+    server_thread = threading.Thread(target=server.serve_forever)
+    # Exit the server thread when the main thread terminates
+    server_thread.daemon = True
+    server_thread.start()
+    print "Server loop running in thread:", server_thread.name
 
     globals.view = globals.view = view.GameView()
 
@@ -50,8 +81,9 @@ def main():
     pygame.display.toggle_fullscreen()
 
     while not done:
+        clock.tick(10)
+        
         drawing.NewFrame()
-
         globals.view.Update()
         globals.view.Draw()
         globals.screen_root.Draw()
@@ -64,14 +96,13 @@ def main():
             if event.type == pygame.locals.QUIT:
                 done = True
                 break
-            if (event.type == pygame.KEYUP):
-                if event.key == pygame.key.K_f:
+            elif (event.type == pygame.KEYUP):
+                if event.key == pygame.K_f:
                     pygame.display.toggle_fullscreen()
-                else:
-                    done = True
-                    break
 
-        time.sleep(1)
+            elif event.type == pygame.USEREVENT:
+                globals.view.set_items(event.names, event.chosen)
+
 
 if __name__ == '__main__':
     import logging

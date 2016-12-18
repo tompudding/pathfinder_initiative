@@ -155,8 +155,12 @@ class HeroData(object):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #now connect to the web server on port 80
         # - the normal http port
-        s.connect(("127.0.0.1", 4919))
-        s.send(buffer)
+        try:
+            s.connect(("127.0.0.1", 4919))
+            s.send(buffer)
+        except socket.error as e:
+            print 'Error connecting'
+
         s.close()
         
 
@@ -230,6 +234,8 @@ def scan_initiative(pid, maps, bad_maps):
         if map in bad_maps:
             continue
         count = 0
+        if bad_maps:
+            print 'scanning %08x - %08x : %s %d' % (map.start, map.end, map.filename, len(bad_maps))
         for pos in map.scan(needle):
             #print '%08x - %08x : %s' % (map.start, map.end, map.filename)
             matches.append((pos - 1, map))
@@ -247,7 +253,10 @@ def scan_initiative(pid, maps, bad_maps):
         references = []
         needle = struct.pack('<I',pos - offset)
         for map in maps:
-            references.extend([ref for ref in map.scan(needle)])
+            matches = [ref for ref in map.scan(needle)]
+            references.extend(matches)
+            if matches and map in bad_maps:
+                bad_maps.remove(map)
 
         if len(references) < 2:
             continue
@@ -296,6 +305,7 @@ def scan_initiative(pid, maps, bad_maps):
         except RuntimeError:
             continue
         actors.append(actor)
+        print 'Match on map %08x - %08x : %s' % (src_map.start, src_map.end, src_map.filename)
         total_estimates.add( (num_ptr, num) )
 
     if len(total_estimates) != 1:
@@ -303,6 +313,7 @@ def scan_initiative(pid, maps, bad_maps):
         raise RuntimeError('Got more than one guess at the number of participants')
     count_ptr, count = total_estimates.pop()
     if len(actors) != count:
+        print 'blarg',len(actors),count
         raise RuntimeError('Error, got %d actors but expected %d' % (len(actors), count))
 
     return HeroData(pid, count_ptr, actors)
@@ -331,6 +342,7 @@ def main():
         try:
             hero_data = scan_initiative(pid, writable_maps, bad_maps)
         except RuntimeError as e:
+            #raise e
             bad_maps = set()
             continue
         print 'scanned'

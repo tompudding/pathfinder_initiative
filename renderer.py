@@ -48,9 +48,10 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
         if not data:
             return
         chosen = ord(data[0])
-        names = data[1:].split('\x00')
+        gone = ord(data[1])
+        names = data[2:].split('\x00')
         print 'got',names,chosen
-        new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen })
+        new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen, 'gone' : gone })
         pygame.event.post(new_event)
 
 
@@ -101,7 +102,7 @@ def main():
                     pygame.display.toggle_fullscreen()
 
             elif event.type == pygame.USEREVENT:
-                globals.view.set_items(event.names, event.chosen)
+                globals.view.set_items(event.names, event.chosen, event.gone)
 
 
 if __name__ == '__main__':

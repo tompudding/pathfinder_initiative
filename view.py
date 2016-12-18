@@ -9,12 +9,21 @@ class PlayerData(ui.UIElement):
     margin = Point(0,0.1)
     unselected = (0, 0, 0.4, 1.0)
     selected = (1, 0.5, 0, 1)
+    players = 'Fiz Gig', 'Tallin Erris', 'Brottor Strakeln', 'Cirefus'
     def __init__(self, parent, pos, tr, name):
         if not name:
             name = 'unknown'
+        if any((player in name for player in self.players)):
+            self.unselected = (0.5, 0.5, 0.9, 1.0)
+            self.selected = (1,1,0,1)
         self.name = name
+        self.is_selected = False
+
         super(PlayerData, self).__init__( parent, pos, tr )
-        self.box = ui.Box(self, Point(0,self.margin.y), Point(1,1.0 - self.margin.y), colour=self.unselected)
+        bl = Point(0,self.margin.y)
+        tr = Point(1,1.0 - self.margin.y)
+        self.box = ui.Box(self, bl, tr, colour=self.unselected)
+        #self.overlay = ui.Box(self.box, Point(0,0), Point(1,1), colour=(1,0,0,0.5), level=0.1)
         abs_height = self.box.absolute.size.y
         scale = min(30, globals.text_manager.GetScale(abs_height*0.95))
         text_height = globals.text_manager.GetSize(self.name, scale)
@@ -30,16 +39,32 @@ class PlayerData(ui.UIElement):
                                colour = self.selected,
                                alignment = drawing.texture.TextAlignments.CENTRE)
 
+    def set_gone(self):
+        if self.is_selected:
+            #This really shouldn't happen
+            return
+        self.box.SetColour( tuple([v*0.5 for v in self.unselected]) )
+        self.text.SetColour( tuple([v*0.5 for v in self.selected]) )
+
+    def set_ready(self):
+        self.box.bottom_left += Point(0.1,0)
+        self.box.top_right += Point(0.1, 0)
+
+        self.box.UpdatePosition()
+
     def select(self):
+        self.is_selected = True
         self.box.SetColour(self.selected)
         self.text.SetColour(self.unselected)
 
     def unselect(self):
+        self.is_selected = False
         self.box.SetColour(self.unselected)
         self.text.SetColour(self.selected)
 
     def Destroy(self):
         self.box.Delete()
+        #self.overlay.Delete()
         
 
 class GameView(ui.RootElement):
@@ -56,9 +81,9 @@ class GameView(ui.RootElement):
         #self.box = ui.Box(self, Point(0.1,0.1), Point(0.8,0.8), colour=(1,0,0,1))
         self.items = []
         self.chosen = None
-        self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 0)
+        self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 3, 1)
 
-    def set_items(self, name_list, chosen):
+    def set_items(self, name_list, chosen, num_gone):
         self.clear_items()
         display_len = len(name_list)
         if display_len < self.min_len:
@@ -76,9 +101,16 @@ class GameView(ui.RootElement):
 
         if chosen >= len(self.items):
             chosen = len(self.items) - 1
+        if num_gone >= len(self.items):
+            num_gone = len(self.items) - 1
 
         self.chosen = chosen
         self.items[chosen].select()
+        for i in xrange(num_gone):
+            self.items[i].set_gone()
+
+        for i in xrange(num_gone, chosen):
+            self.items[i].set_ready()
         
     def clear_items(self):
         for item in self.items:

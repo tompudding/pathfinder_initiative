@@ -63,7 +63,7 @@ class Region(object):
 
 def parse_name(name):
     if not name.startswith('{'):
-        raise ValueError()
+        raise RuntimeError()
     selected = name.startswith('{text clrbright}')
     gone = name.startswith('{text clrdisable}')
     out = [part for part in name.split('}') if part and part[0] != '{'][0].split('\x00')
@@ -86,15 +86,8 @@ class Actor(object):
         "Reload properties and return True if anything has changed"
         init  = vmaccess.vm_read_word(self.pid, self.init_ptr)
         order = vmaccess.vm_read_word(self.pid, self.order_ptr)
-        try:
-            name_data = vmaccess.vm_read(pid, self.name_ptr, 1024)
-        except RuntimeError:
-            return True
-
-        try:
-            name,selected,gone = parse_name(name_data)
-        except:
-            return True
+        name_data = vmaccess.vm_read(pid, self.name_ptr, 1024)
+        name,selected,gone = parse_name(name_data)
         
         if (self.init, self.order, self.name, self.selected, self.gone) != (init, order, name, selected, gone):
             self.init, self.order, self.name, self.selected, self.gone = init, order, name, selected, gone
@@ -125,6 +118,20 @@ class Actor(object):
             extra = ''
         return 'init=%2d order=%2d name=%s %s' % (self.init, self.order, self.name, extra )
 
+
+players = 'Fiz Gig', 'Tallin Erris', 'Brottor Strakeln', 'Cirefus'
+
+def sanitise_name(name):
+    #If there's a part in double square brackets use that, otherwise use generic
+    if any((player in name for player in players)):
+        return name
+    if '[[' in name:
+        hidden_name = name.split('[[')[1].split(']]')
+        full_name = ''.join(hidden_name).split('(')[0]
+        return full_name
+    
+    return 'Mysterious Monster'
+
 class HeroData(object):
     def __init__(self, pid, count_ptr, actors):
         self.pid = pid
@@ -132,6 +139,7 @@ class HeroData(object):
         self.actors = sorted(actors, lambda x,y : cmp(x.order, y.order))
         gone = [actor for actor in self.actors if actor.gone]
         not_gone = [actor for actor in self.actors if not actor.gone]
+        self.num_gone = len(gone)
         self.actors = gone + not_gone
 
     def scan_for_changes(self):
@@ -151,7 +159,7 @@ class HeroData(object):
         else:
             i = 0xff
         chosen = i
-        buffer = chr(chosen) + '\x00'.join( (actor.name for actor in self.actors))
+        buffer = chr(chosen) + chr(self.num_gone) + '\x00'.join( (sanitise_name(actor.name) for actor in self.actors))
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #now connect to the web server on port 80
         # - the normal http port
@@ -159,7 +167,8 @@ class HeroData(object):
             s.connect(("127.0.0.1", 4919))
             s.send(buffer)
         except socket.error as e:
-            print 'Error connecting'
+            #print 'Error connecting'
+            pass
 
         s.close()
         
@@ -355,9 +364,13 @@ def main():
         last_data = hero_data
 
         while True:
-            if hero_data.scan_for_changes():
-                print 'change detected'
+            try:
+                if hero_data.scan_for_changes():
+                    print 'change detected'
+                    break
+                time.sleep(0.1)
+                hero_data.send()
+            except:
                 break
-            time.sleep(1)
 
 main()

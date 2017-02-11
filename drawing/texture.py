@@ -11,6 +11,7 @@ import constants
 import quads
 import opengl
 import sprite
+import numpy
 
 from globals.types import Point
 
@@ -39,6 +40,25 @@ class Texture(object):
         else:
             self.texture,self.width,self.height = cache[filename]
             glBindTexture(GL_TEXTURE_2D, self.texture)
+
+    def get_full_tc(self, screen):
+        """
+        Return texture coordinates that draw as much of this texture we can preserving aspect ratio
+        """
+        screen_aspect = float(screen.x)/screen.y
+        aspect = float(self.width)/self.height
+        if aspect > screen_aspect:
+            #we're wider than the screen, so we want extra height
+            x = ((aspect/screen_aspect) - 1) / 2
+            tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
+        elif aspect < screen_aspect:
+            #We're taller than the screen, so we want extra width
+            x = ((screen_aspect / aspect) - 1) / 2
+            tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1,0)])
+        else:
+            tc = drawing.constants.full_tc
+        return tc
+        
 
 class RenderTarget(object):
     """

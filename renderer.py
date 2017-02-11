@@ -30,6 +30,7 @@ def Init():
     globals.tile_dimensions       = Point(16,16)*globals.tile_scale
     globals.zoom_scale            = None
     globals.time_step             = 0.05
+    globals.processing            = False
 
     globals.dirs = globals.types.Directories('resource')
 
@@ -40,19 +41,34 @@ def Init():
 
     globals.text_manager = drawing.texture.TextManager()
 
+class MessageType:
+    REQUEST_IMAGE_LIST = 0
+    CHOOSE_IMAGE_LIST  = 1
+    GAME_MODE          = 2
+
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self):
         data = self.request.recv(1024)
         #First there should be a single byte which is the selected number
-        if not data:
+        if not data or globals.processing:
             return
-        chosen = ord(data[0])
-        gone = ord(data[1])
-        names = data[2:].split('\x00')
-        print 'got',names,chosen
-        new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen, 'gone' : gone })
-        pygame.event.post(new_event)
+        globals.processing = True
+        message_type = ord(data[1])
+        if message_type == MessageType.REQUEST_IMAGE_LIST:
+            #This means request image list
+            self.request.send('\x00'.join(globals.environ_list))
+        elif message_type == MessageType.CHOOSE_IMAGE_LIST:
+            #This mean choose image list
+            name = data[2:].split('\x00')[0]
+
+        elif message_type == MessageType.GAME_MODE:
+            chosen = ord(data[0])
+            gone = ord(data[1])
+            names = data[2:].split('\x00')
+            print 'got',names,chosen
+            new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen, 'gone' : gone })
+            pygame.event.post(new_event)
 
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
@@ -65,6 +81,9 @@ def main():
     server = ThreadedTCPServer(('0.0.0.0', 4919), ThreadedTCPRequestHandler)
     ip, port = server.server_address
 
+    globals.environ_list = os.listdir('resource')
+    print globals.environ_list
+
     # Start a thread with the server -- that thread will then start one
     # more thread for each request
     server_thread = threading.Thread(target=server.serve_forever)
@@ -73,16 +92,21 @@ def main():
     server_thread.start()
     print "Server loop running in thread:", server_thread.name
 
-    globals.view = globals.view = view.GameView()
+    globals.game_view = view.GameView()
+    globals.image_view = view.ImageView()
+
+    #Start with a neutral image being displayed
+    globals.view = globals.image_view
 
     done = False
     last = 0
     clock = pygame.time.Clock()
     drawing.InitDrawing()
-    pygame.display.toggle_fullscreen()
+    #pygame.display.toggle_fullscreen()
 
     while not done:
-        clock.tick(10)
+        clock.tick(30)
+        globals.time = pygame.time.get_ticks()
         
         drawing.NewFrame()
         globals.view.Update()
@@ -103,6 +127,7 @@ def main():
 
             elif event.type == pygame.USEREVENT:
                 globals.view.set_items(event.names, event.chosen, event.gone)
+                globals.processing = False
 
 
 if __name__ == '__main__':

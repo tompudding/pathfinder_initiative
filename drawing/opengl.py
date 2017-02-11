@@ -51,6 +51,7 @@ def InitDrawing():
     glEnableClientState(GL_COLOR_ARRAY)
     glEnable(GL_TEXTURE_2D)
 
+
 def DrawAll(quad_buffer,texture):
     """
     Draw a quadbuffer with with a vertex array, texture coordinate array, and a colour
@@ -59,6 +60,9 @@ def DrawAll(quad_buffer,texture):
     glBindTexture(GL_TEXTURE_2D, texture)
     glVertexPointerf(quad_buffer.vertex_data)
     glTexCoordPointerf(quad_buffer.tc_data)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, (0,0,0,1));
     glColorPointer(4,GL_FLOAT,0,quad_buffer.colour_data)
     glDrawElements(quad_buffer.draw_type,quad_buffer.current_size,GL_UNSIGNED_INT,quad_buffer.indices)
 

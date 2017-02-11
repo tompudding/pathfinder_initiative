@@ -81,7 +81,7 @@ class GameView(ui.RootElement):
         #self.box = ui.Box(self, Point(0.1,0.1), Point(0.8,0.8), colour=(1,0,0,1))
         self.items = []
         self.chosen = None
-        self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 3, 1)
+        #self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 3, 1)
 
     def set_items(self, name_list, chosen, num_gone):
         self.clear_items()
@@ -139,3 +139,104 @@ class GameView(ui.RootElement):
     def KeyUp(self,key):
         pass
 
+class ImageView(ui.RootElement):
+    fade_start = 5000
+    fade_end   = 8000
+    zoom_start = 1.0
+    zoom_end   = 1.05
+    zoom_amount = zoom_end - zoom_start
+
+    def __init__(self):
+        super(ImageView,self).__init__(Point(0,0),globals.screen)
+        #We have two quads, one for the current image and one for the next
+        self.current_buffer = drawing.QuadBuffer(16)
+        self.next_buffer    = drawing.QuadBuffer(16)
+        self.current_quad = drawing.Quad(self.current_buffer, tc=drawing.constants.full_tc)
+        self.next_quad    = drawing.Quad(self.next_buffer, tc=drawing.constants.full_tc)
+
+        self.current_quad.SetVertices( self.absolute.bottom_left, self.absolute.top_right, 1)
+        self.next_quad.SetVertices( self.absolute.bottom_left, self.absolute.top_right, 2)
+        #Load the names of all the images we might be using
+        self.screens = {}
+        for screen in os.listdir('resource'):
+            images = []
+            dirname = os.path.join( 'resource', screen )
+            for image in os.listdir( dirname ):
+                images.append( os.path.join(dirname, image) )
+            if len(images) == 0:
+                continue
+            self.screens[screen] = images
+
+        #To start things off we load the first and second images into separate textures
+        self.current_screen = 'main'
+        self.current_images = list(self.screens[self.current_screen])
+        random.shuffle(self.current_images)
+        self.current_texture = self.get_next_texture(self.current_quad)
+
+        self.next_texture = self.get_next_texture(self.next_quad)
+
+        #Then show the current one
+        self.current_quad.SetColour( (1,1,1,1) )
+        self.next_quad.SetColour( (1,1,1,0) )
+        self.start_time = None
+
+    def get_next_texture(self, quad):
+        try:
+            image = self.current_images.pop(0)
+        except IndexError:
+            self.current_images = list(self.screens[self.current_screen])
+            random.shuffle(self.current_images)
+            image = self.current_images.pop(0)
+        
+        new = drawing.texture.Texture(image)
+        quad.SetTextureCoordinates( new.get_full_tc(globals.screen) )
+        return new
+
+    def Update(self):
+        if self.start_time is None:
+            self.start_time = globals.time
+            return
+        elapsed = globals.time - self.start_time
+        current_opacity = 1
+        next_opacity = 0
+        current_scale = self.zoom_end + self.zoom_amount*(float(elapsed) / self.fade_end)
+        next_scale = self.zoom_start
+        if elapsed > self.fade_end:
+            #We've finished fading
+            self.start_time = globals.time
+            self.current_texture = self.next_texture
+            self.current_quad.SetTextureCoordinates( self.current_texture.get_full_tc(globals.screen) )
+            self.next_texture = self.get_next_texture(self.next_quad)
+            current_scale = self.zoom_end
+        elif elapsed > self.fade_start:
+            fade_partial = float(elapsed - self.fade_start) / (self.fade_end - self.fade_start)
+            next_opacity = fade_partial
+            next_scale = self.zoom_start + self.zoom_amount*fade_partial
+            current_opacity = 1-fade_partial
+        
+        self.current_quad.SetColour( (1,1,1,current_opacity) )
+        self.next_quad.SetColour( (1,1,1,next_opacity) )
+
+        #Maybe skip this
+        bl = -0.5*current_scale + 0.5
+        tr = 0.5*current_scale + 0.5
+        self.current_quad.SetVertices( globals.screen*bl, globals.screen*tr, 1)
+        scale = next_opacity
+        bl = -0.5*next_scale + 0.5
+        tr = 0.5*next_scale + 0.5
+        self.next_quad.SetVertices( globals.screen*bl, globals.screen*tr, 2)
+            
+    def KeyDown(self,key):
+        pass
+
+    def KeyUp(self,key):
+        pass
+
+    def Draw(self):
+        drawing.ResetState()
+        drawing.Translate(0,0,0)
+        #drawing.DrawNoTexture(globals.line_buffer)
+        #drawing.DrawNoTexture(globals.colour_tiles)
+        drawing.DrawAll(self.current_buffer,self.current_texture.texture)
+        drawing.DrawAll(self.next_buffer,self.next_texture.texture)
+        #drawing.DrawAll(globals.nonstatic_text_buffer,globals.text_manager.atlas.texture.texture)

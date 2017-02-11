@@ -164,10 +164,10 @@ class HeroData(object):
         #now connect to the web server on port 80
         # - the normal http port
         try:
-            s.connect(("127.0.0.1", 4919))
+            s.connect(("192.168.144.251", 4919))
             s.send(buffer)
         except socket.error as e:
-            #print 'Error connecting'
+            print 'Error connecting'
             pass
 
         s.close()
@@ -243,8 +243,8 @@ def scan_initiative(pid, maps, bad_maps):
         if map in bad_maps:
             continue
         count = 0
-        if bad_maps:
-            print 'scanning %08x - %08x : %s %d' % (map.start, map.end, map.filename, len(bad_maps))
+        #if bad_maps:
+        #    print 'scanning %08x - %08x : %s %d' % (map.start, map.end, map.filename, len(bad_maps))
         for pos in map.scan(needle):
             #print '%08x - %08x : %s' % (map.start, map.end, map.filename)
             matches.append((pos - 1, map))
@@ -276,9 +276,14 @@ def scan_initiative(pid, maps, bad_maps):
             if name_ptr < 0x8000:
                 continue
             try:
-                name_data = vmaccess.vm_read(pid, name_ptr, 1024)
+                name_data = vmaccess.vm_read(pid, name_ptr, 512)
             except RuntimeError:
                 continue
+                try:
+                    print 'trying with len',0x1000 - (name_ptr&0xfff)
+                    name_data = vmaccess.vm_read(pid, name_ptr, 0x1000 - (name_ptr&0xfff))
+                except RuntimeError:
+                    continue
 
             try:
                 name,selected,gone = parse_name(name_data)
@@ -314,7 +319,7 @@ def scan_initiative(pid, maps, bad_maps):
         except RuntimeError:
             continue
         actors.append(actor)
-        print 'Match on map %08x - %08x : %s' % (src_map.start, src_map.end, src_map.filename)
+        #print 'Match on map %08x - %08x : %s' % (src_map.start, src_map.end, src_map.filename)
         total_estimates.add( (num_ptr, num) )
 
     if len(total_estimates) != 1:
@@ -323,6 +328,8 @@ def scan_initiative(pid, maps, bad_maps):
     count_ptr, count = total_estimates.pop()
     if len(actors) != count:
         print 'blarg',len(actors),count
+        for actor in actors:
+            print actor
         raise RuntimeError('Error, got %d actors but expected %d' % (len(actors), count))
 
     return HeroData(pid, count_ptr, actors)
@@ -364,12 +371,16 @@ def main():
         last_data = hero_data
 
         while True:
+            slept = 0
             try:
                 if hero_data.scan_for_changes():
                     print 'change detected'
                     break
                 time.sleep(0.1)
-                hero_data.send()
+                slept += 1
+                if slept >= 20:
+                    slept = 0
+                    hero_data.send()
             except:
                 break
 

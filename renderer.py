@@ -9,6 +9,7 @@ import socket
 import threading
 import SocketServer
 from globals.types import Point
+import messages
 
 def Init():
     """Initialise everything. Run once on startup"""
@@ -41,31 +42,31 @@ def Init():
 
     globals.text_manager = drawing.texture.TextManager()
 
-class MessageType:
-    REQUEST_IMAGE_LIST = 0
-    CHOOSE_IMAGE_LIST  = 1
-    GAME_MODE          = 2
-
-
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self):
         data = self.request.recv(1024)
         #First there should be a single byte which is the selected number
-        if not data or globals.processing:
+        if not data:
             return
-        globals.processing = True
-        message_type = ord(data[1])
-        if message_type == MessageType.REQUEST_IMAGE_LIST:
+        message_type = ord(data[0])
+        print 'Got message %d' % message_type
+        if message_type == messages.MessageType.REQUEST_IMAGE_LIST:
             #This means request image list
+            print 'Sending list',globals.environ_list
             self.request.send('\x00'.join(globals.environ_list))
-        elif message_type == MessageType.CHOOSE_IMAGE_LIST:
+        elif message_type == messages.MessageType.CHOOSE_IMAGE_LIST:
             #This mean choose image list
-            name = data[2:].split('\x00')[0]
+            name = data[1:].split('\x00')[0]
+            new_event = pygame.event.Event(pygame.USEREVENT + 1, {'name' : name})
+            pygame.event.post(new_event)
 
-        elif message_type == MessageType.GAME_MODE:
-            chosen = ord(data[0])
-            gone = ord(data[1])
-            names = data[2:].split('\x00')
+        elif message_type == messages.MessageType.GAME_MODE:
+            if globals.processing:
+                return
+            globals.processing = True
+            chosen = ord(data[1])
+            gone = ord(data[2])
+            names = data[3:].split('\x00')
             print 'got',names,chosen
             new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen, 'gone' : gone })
             pygame.event.post(new_event)
@@ -126,8 +127,17 @@ def main():
                     pygame.display.toggle_fullscreen()
 
             elif event.type == pygame.USEREVENT:
+                if globals.view is not globals.game_view:
+                    globals.view.hide()
+                    globals.view = globals.game_view
                 globals.view.set_items(event.names, event.chosen, event.gone)
                 globals.processing = False
+
+            elif event.type == pygame.USEREVENT + 1:
+                if globals.view is not globals.image_view:
+                    globals.view.hide()
+                    globals.view = globals.image_view
+                globals.view.set_dir(event.name)
 
 
 if __name__ == '__main__':

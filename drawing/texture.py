@@ -49,14 +49,19 @@ class Texture(object):
         aspect = float(self.width)/self.height
         if aspect > screen_aspect:
             #we're wider than the screen, so we want extra height
-            x = ((aspect/screen_aspect) - 1) / 2
-            tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
+            #x = ((aspect/screen_aspect) - 1) / 2
+            #tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
+            x = ((screen_aspect/aspect) - 1)/2
+            tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1+x,0)])
+                 
         elif aspect < screen_aspect:
             #We're taller than the screen, so we want extra width
-            x = ((screen_aspect / aspect) - 1) / 2
-            tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1,0)])
+            #x = ((screen_aspect / aspect) - 1) / 2
+            x = ((aspect/screen_aspect) - 1)/2
+            #tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1+x,0)])
+            tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
         else:
-            tc = drawing.constants.full_tc
+            tc = constants.full_tc
         return tc
         
 

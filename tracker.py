@@ -5,6 +5,12 @@ import hashlib
 import time
 import struct
 import socket
+import multiprocessing
+import globals
+import messages
+
+#remote_addr = ("192.168.144.251", 4919)
+remote_addr = ("127.0.0.1", 4919)
 
 class Perms(object):
     def __init__(self, perms_string):
@@ -159,12 +165,12 @@ class HeroData(object):
         else:
             i = 0xff
         chosen = i
-        buffer = chr(chosen) + chr(self.num_gone) + '\x00'.join( (sanitise_name(actor.name) for actor in self.actors))
+        buffer = chr(messages.MessageType.GAME_MODE) + chr(chosen) + chr(self.num_gone) + '\x00'.join( (sanitise_name(actor.name) for actor in self.actors))
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #now connect to the web server on port 80
         # - the normal http port
         try:
-            s.connect(("192.168.144.251", 4919))
+            s.connect(remote_addr)
             s.send(buffer)
         except socket.error as e:
             print 'Error connecting'
@@ -348,7 +354,10 @@ def is_candidate_map(map):
     #    return False
     return True
 
-def main():
+globals.scanning = False
+globals.running = True
+
+def scan_main():
     last_data = None
     bad_maps = set()
     while True:
@@ -384,4 +393,78 @@ def main():
             except:
                 break
 
-main()
+import cursesmenu
+import sys
+
+class StdOutWrapper:
+    text = []
+    def write(self,txt):
+        self.text.append(txt)
+        if len(self.text) > 500:
+            self.text = self.text[:500]
+    def get_text(self):
+        return ''.join(self.text)
+
+    def flush(self):
+        pass
+
+def start_game_mode():
+    if globals.game_process:
+        return
+    globals.game_process = multiprocessing.Process(target=scan_main)
+    globals.game_process.start()
+
+def get_scene_list():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #now connect to the web server on port 80
+    # - the normal http port
+    try:
+        s.connect(remote_addr)
+        s.send(chr(messages.MessageType.REQUEST_IMAGE_LIST))
+        response = s.recv(1024)
+        return response.split('\x00')
+    except socket.error as e:
+        print 'Error connecting'
+
+def choose_scene(name):
+    if globals.game_process:
+        #Kill this bad boy
+        os.kill(globals.game_process.pid, 9)
+        globals.game_process.join()
+        globals.game_process = None
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(remote_addr)
+        s.send(chr(messages.MessageType.CHOOSE_IMAGE_LIST) + name)
+    except socket.error as e:
+        print 'Error connecting'
+
+def create_menu():
+    # Create the menu
+    globals.game_process = None
+    menu = cursesmenu.CursesMenu("Pathfinder")
+
+    # Create some items
+    options = get_scene_list()
+    
+    # A FunctionItem runs a Python function when selected
+    menu.append_item(cursesmenu.items.FunctionItem("Game Mode", start_game_mode))
+    for item in options:
+        menu.append_item(cursesmenu.items.FunctionItem(item, choose_scene, (item,)))
+
+    menu.show()
+
+if __name__ == '__main__':
+    mystdout = StdOutWrapper()
+    sys.stdout = mystdout
+    sys.stderr = mystdout
+    #create the scanning process
+    try:
+        create_menu()
+    finally:
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        sys.stdout.write(mystdout.get_text())
+
+
+

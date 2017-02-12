@@ -83,6 +83,9 @@ class GameView(ui.RootElement):
         self.chosen = None
         #self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 3, 1)
 
+    def hide(self):
+        self.clear_items()
+
     def set_items(self, name_list, chosen, num_gone):
         self.clear_items()
         display_len = len(name_list)
@@ -167,8 +170,17 @@ class ImageView(ui.RootElement):
                 continue
             self.screens[screen] = images
 
+        self.set_dir('main')
+
+    def hide(self):
+        self.current_quad.Disable()
+        self.next_quad.Disable()
+
+    def set_dir(self, dirname):
+        self.current_quad.Enable()
+        self.next_quad.Enable()
         #To start things off we load the first and second images into separate textures
-        self.current_screen = 'main'
+        self.current_screen = dirname
         self.current_images = list(self.screens[self.current_screen])
         random.shuffle(self.current_images)
         self.current_texture = self.get_next_texture(self.current_quad)

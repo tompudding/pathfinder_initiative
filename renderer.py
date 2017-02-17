@@ -38,8 +38,9 @@ def Init():
     pygame.init()
     screen = pygame.display.set_mode((w,h),pygame.OPENGL|pygame.DOUBLEBUF)
     pygame.display.set_caption('Pathfinder')
-    drawing.Init(globals.screen.x,globals.screen.y)
 
+    drawing.Init(globals.screen.x,globals.screen.y)
+    pygame.mouse.set_visible(False)
     globals.text_manager = drawing.texture.TextManager()
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
@@ -110,8 +111,10 @@ def main():
         globals.time = pygame.time.get_ticks()
         
         drawing.NewFrame()
-        globals.view.Update()
-        globals.view.Draw()
+        globals.image_view.Update()
+        globals.image_view.Draw()
+        globals.game_view.Update()
+        globals.game_view.Draw()
         globals.screen_root.Draw()
         globals.text_manager.Draw()
         #drawing.EndFrame()
@@ -127,17 +130,20 @@ def main():
                     pygame.display.toggle_fullscreen()
 
             elif event.type == pygame.USEREVENT:
-                if globals.view is not globals.game_view:
-                    globals.view.hide()
-                    globals.view = globals.game_view
-                globals.view.set_items(event.names, event.chosen, event.gone)
+                #if globals.view is not globals.game_view:
+                #    globals.view.hide()
+                #    globals.view = globals.game_view
+                globals.game_view.set_items(event.names, event.chosen, event.gone)
+                globals.image_view.set_colour( (0.5,0.5,0.5) )
                 globals.processing = False
 
             elif event.type == pygame.USEREVENT + 1:
-                if globals.view is not globals.image_view:
-                    globals.view.hide()
-                    globals.view = globals.image_view
-                globals.view.set_dir(event.name)
+                #if globals.view is not globals.image_view:
+                #    globals.view.hide()
+                #    globals.view = globals.image_view
+                globals.game_view.clear_items()
+                globals.image_view.set_dir(event.name)
+                globals.image_view.set_colour( (1,1,1) )
 
 
 if __name__ == '__main__':

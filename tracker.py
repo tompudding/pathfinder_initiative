@@ -129,7 +129,7 @@ players = 'Fiz Gig', 'Tallin Erris', 'Brottor Strakeln', 'Cirefus'
 
 def sanitise_name(name):
     #If there's a part in double square brackets use that, otherwise use generic
-    if any((player in name for player in players)):
+    if any((name.startswith(player) for player in players)):
         return name
     if '[[' in name:
         hidden_name = name.split('[[')[1].split(']]')
@@ -277,7 +277,7 @@ def scan_initiative(pid, maps, bad_maps):
             continue
 
         for ref in references:
-            name_ptr = vmaccess.vm_read_word(pid, ref - 0x478)
+            name_ptr = vmaccess.vm_read_word(pid, ref - 0x430)
 
             if name_ptr < 0x8000:
                 continue
@@ -295,6 +295,7 @@ def scan_initiative(pid, maps, bad_maps):
                 name,selected,gone = parse_name(name_data)
             except:
                 continue
+
             #print name,selected
             # if 'Tallin' in name:
             #     with open('/tmp/tallin.bin','wb') as f:
@@ -449,6 +450,8 @@ def create_menu():
     
     # A FunctionItem runs a Python function when selected
     menu.append_item(cursesmenu.items.FunctionItem("Game Mode", start_game_mode))
+    if options is None:
+        options = []
     for item in options:
         menu.append_item(cursesmenu.items.FunctionItem(item, choose_scene, (item,)))
 

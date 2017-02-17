@@ -13,7 +13,7 @@ class PlayerData(ui.UIElement):
     def __init__(self, parent, pos, tr, name):
         if not name:
             name = 'unknown'
-        if any((player in name for player in self.players)):
+        if any((name.startswith(player) for player in self.players)):
             self.unselected = (0.5, 0.5, 0.9, 1.0)
             self.selected = (1,1,0,1)
         self.name = name
@@ -156,6 +156,7 @@ class ImageView(ui.RootElement):
         self.next_buffer    = drawing.QuadBuffer(16)
         self.current_quad = drawing.Quad(self.current_buffer, tc=drawing.constants.full_tc)
         self.next_quad    = drawing.Quad(self.next_buffer, tc=drawing.constants.full_tc)
+        self.set_colour( (1,1,1) )
 
         self.current_quad.SetVertices( self.absolute.bottom_left, self.absolute.top_right, 1)
         self.next_quad.SetVertices( self.absolute.bottom_left, self.absolute.top_right, 2)
@@ -170,7 +171,13 @@ class ImageView(ui.RootElement):
                 continue
             self.screens[screen] = images
 
+        self.current_texture = None
+        self.next_texture = None
         self.set_dir('main')
+        
+
+    def set_colour(self, colour):
+        self.colour = colour
 
     def hide(self):
         self.current_quad.Disable()
@@ -183,14 +190,32 @@ class ImageView(ui.RootElement):
         self.current_screen = dirname
         self.current_images = list(self.screens[self.current_screen])
         random.shuffle(self.current_images)
+        for texture in self.current_texture, self.next_texture:
+            if texture:
+                texture.delete()
+
+        self.fade = len(self.current_images) > 1
         self.current_texture = self.get_next_texture(self.current_quad)
-
         self.next_texture = self.get_next_texture(self.next_quad)
+        self.current_quad.SetColour( self.colour + (1,) )
+        self.next_quad.SetColour( self.colour + (0,) )
 
-        #Then show the current one
-        self.current_quad.SetColour( (1,1,1,1) )
-        self.next_quad.SetColour( (1,1,1,0) )
+        if self.fade:
+            self.current_quad.SetVertices( Point(0,0), globals.screen, 1)
+
         self.start_time = None
+        self.next_images = None
+        
+
+    def change_dir(self, dirname):
+        if dirname == self.current_screen:
+            return
+        self.next_screen = dirname
+        #If we're currently on a screen, we want to change the next image to come from the new set immediately
+        if self.start_time is None:
+            #This should only happen during the first frame
+            self.start_time = globals.time
+        elapsed = globals.time - self.start_time
 
     def get_next_texture(self, quad):
         try:
@@ -201,12 +226,15 @@ class ImageView(ui.RootElement):
             image = self.current_images.pop(0)
         
         new = drawing.texture.Texture(image)
-        quad.SetTextureCoordinates( new.get_full_tc(globals.screen) )
+        quad.SetTextureCoordinates( new.get_full_tc(globals.screen, self.fade) )
         return new
 
     def Update(self):
         if self.start_time is None:
             self.start_time = globals.time
+            return
+        if not self.fade:
+            #Fixed image
             return
         elapsed = globals.time - self.start_time
         current_opacity = 1
@@ -216,8 +244,11 @@ class ImageView(ui.RootElement):
         if elapsed > self.fade_end:
             #We've finished fading
             self.start_time = globals.time
+            if self.current_texture:
+                self.current_texture.delete()
             self.current_texture = self.next_texture
-            self.current_quad.SetTextureCoordinates( self.current_texture.get_full_tc(globals.screen) )
+            #self.current_quad.SetTextureCoordinates( self.current_texture.get_full_tc(globals.screen) )
+            self.current_quad.SetTextureCoordinates( self.next_quad.GetTextureCoordinates() )
             self.next_texture = self.get_next_texture(self.next_quad)
             current_scale = self.zoom_end
         elif elapsed > self.fade_start:
@@ -226,8 +257,8 @@ class ImageView(ui.RootElement):
             next_scale = self.zoom_start + self.zoom_amount*fade_partial
             current_opacity = 1-fade_partial
         
-        self.current_quad.SetColour( (1,1,1,current_opacity) )
-        self.next_quad.SetColour( (1,1,1,next_opacity) )
+        self.current_quad.SetColour( self.colour + (current_opacity,) )
+        self.next_quad.SetColour( self.colour + (next_opacity,) )
 
         #Maybe skip this
         bl = -0.5*current_scale + 0.5

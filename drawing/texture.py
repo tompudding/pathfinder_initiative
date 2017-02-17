@@ -12,6 +12,7 @@ import quads
 import opengl
 import sprite
 import numpy
+import random
 
 from globals.types import Point
 
@@ -22,7 +23,9 @@ class Texture(object):
     """ Load a file into a gltexture and store that texture for later use """
     def __init__(self,filename):
         #filename = os.path.join(globals.dirs.resource,filename)
+        self.filename = filename
         if filename not in cache:
+            print 'Texture',filename
             with open(filename,'rb') as f:
                 self.textureSurface = pygame.image.load(f)
             self.textureData = pygame.image.tostring(self.textureSurface, 'RGBA', 1)
@@ -32,7 +35,7 @@ class Texture(object):
             self.size = Point(self.width,self.height)
 
             self.texture = glGenTextures(1)
-            cache[filename] = (self.texture,self.width,self.height)
+            #cache[filename] = (self.texture,self.width,self.height)
             glBindTexture  (GL_TEXTURE_2D, self.texture)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
@@ -41,7 +44,10 @@ class Texture(object):
             self.texture,self.width,self.height = cache[filename]
             glBindTexture(GL_TEXTURE_2D, self.texture)
 
-    def get_full_tc(self, screen):
+    def delete(self):
+        glDeleteTextures( [self.texture] )
+
+    def get_full_tc(self, screen, fade=True):
         """
         Return texture coordinates that draw as much of this texture we can preserving aspect ratio
         """
@@ -49,17 +55,25 @@ class Texture(object):
         aspect = float(self.width)/self.height
         if aspect > screen_aspect:
             #we're wider than the screen, so we want extra height
-            #x = ((aspect/screen_aspect) - 1) / 2
-            #tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
-            x = ((screen_aspect/aspect) - 1)/2
-            tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1+x,0)])
+            if not fade:
+                x = ((aspect/screen_aspect) - 1) / 2
+                tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
+            else:
+                x = ((screen_aspect/aspect) - 1)/2
+                offset = ((random.random() * 2)-1)*x
+                tc = numpy.array([(offset-x,0),(offset-x,1),(offset+1+x,1),(offset+1+x,0)])
                  
         elif aspect < screen_aspect:
             #We're taller than the screen, so we want extra width
-            #x = ((screen_aspect / aspect) - 1) / 2
-            x = ((aspect/screen_aspect) - 1)/2
-            #tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1+x,0)])
-            tc = numpy.array([(0,-x),(0,1+x),(1,1+x),(1,-x)])
+            if not fade or (screen_aspect / aspect) >= 2:
+                x = ((screen_aspect / aspect) - 1) / 2
+                tc = numpy.array([(-x,0),(-x,1),(1+x,1),(1+x,0)])
+            else:
+                
+                x = ((aspect/screen_aspect) - 1)/2
+                offset = ((random.random() * 2)-1)*x
+                print self.filename,screen_aspect/aspect,x
+                tc = numpy.array([(0,offset-x),(0,offset+1+x),(1,offset+1+x),(1,offset-x)])
         else:
             tc = constants.full_tc
         return tc

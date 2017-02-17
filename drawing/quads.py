@@ -221,6 +221,9 @@ class Shape(object):
     def SetTextureCoordinates(self,tc):
         self.tc[0:self.num_points] = tc
 
+    def GetTextureCoordinates(self):
+        return self.tc[:self.num_points]
+
 def setverticesquad(self,vertex,bl,tr,z):
     vertex[0] = (bl.x,bl.y,z)
     vertex[1] = (bl.x,tr.y,z)

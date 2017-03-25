@@ -238,7 +238,7 @@ class GameView(ui.RootElement):
         elapsed = globals.time - self.last
         self.last = globals.time
             
-        if globals.paused:
+        if globals.paused != False:
             return
 
         try:
@@ -320,7 +320,7 @@ class ImageView(ui.RootElement):
         if self.fade:
             self.current_quad.SetVertices( Point(0,0), globals.screen, 1)
 
-        self.start_time = None
+        self.orig_start = self.start_time = None
         self.next_images = None
         
 
@@ -331,7 +331,7 @@ class ImageView(ui.RootElement):
         #If we're currently on a screen, we want to change the next image to come from the new set immediately
         if self.start_time is None:
             #This should only happen during the first frame
-            self.start_time = globals.time
+            self.orig_start = self.start_time = globals.time
         elapsed = globals.time - self.start_time
 
     def get_next_texture(self, quad):
@@ -348,12 +348,17 @@ class ImageView(ui.RootElement):
 
     def Update(self):
         if self.start_time is None:
-            self.start_time = globals.time
+            self.orig_start = self.start_time = globals.time
             return
         if not self.fade:
             #Fixed image
             return
         elapsed = globals.time - self.start_time
+        if globals.paused != False:
+            time_paused = globals.time - globals.paused
+            print self.orig_start, self.start_time, globals.time, globals.paused
+            self.start_time = self.orig_start + time_paused
+            return
         current_opacity = 1
         next_opacity = 0
         current_scale = self.zoom_end + self.zoom_amount*(float(elapsed) / self.fade_end)

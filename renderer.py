@@ -71,6 +71,11 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             print 'got',names,chosen
             new_event = pygame.event.Event(pygame.USEREVENT, {'names' : names, 'chosen' : chosen, 'gone' : gone })
             pygame.event.post(new_event)
+        elif message_type == messages.MessageType.TOGGLE_PAUSE:
+            if globals.paused == False:
+                globals.paused = globals.time
+            else:
+                globals.paused = False
 
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
@@ -79,6 +84,7 @@ class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 def main():
     """Main loop for the game"""
     Init()
+    globals.paused = False
 
     server = ThreadedTCPServer(('0.0.0.0', 4919), ThreadedTCPRequestHandler)
     ip, port = server.server_address
@@ -94,7 +100,7 @@ def main():
     server_thread.start()
     print "Server loop running in thread:", server_thread.name
 
-    globals.paused = False
+    
     globals.game_view = view.GameView()
     globals.image_view = view.ImageView()
 

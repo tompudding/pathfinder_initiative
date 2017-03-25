@@ -432,6 +432,14 @@ def choose_scene(name):
     except socket.error as e:
         print 'Error connecting'
 
+def toggle_pause():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(remote_addr)
+        s.send(chr(messages.MessageType.TOGGLE_PAUSE))
+    except socket.error as e:
+        print 'Error connecting'
+
 def exit_tracker():
     if globals.game_process:
         #Kill this bad boy
@@ -450,6 +458,7 @@ def create_menu():
     
     # A FunctionItem runs a Python function when selected
     menu.append_item(cursesmenu.items.FunctionItem("Game Mode", start_game_mode))
+    menu.append_item(cursesmenu.items.FunctionItem('Toggle Pause', toggle_pause))
     if options is None:
         options = []
     for item in options:

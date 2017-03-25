@@ -5,19 +5,27 @@ import ui,globals,drawing,os,copy
 from globals.types import Point
 import random
 
+
 class PlayerData(ui.UIElement):
     margin = Point(0,0.1)
     unselected = (0, 0, 0.4, 1.0)
     selected = (1, 0.5, 0, 1)
     players = 'Fiz Gig', 'Tallin Erris', 'Brottor Strakeln', 'Cirefus'
-    def __init__(self, parent, pos, tr, name):
+    def __init__(self, parent, pos, tr, name, initial_time):
         if not name:
             name = 'unknown'
         if any((name.startswith(player) for player in self.players)):
             self.unselected = (0.5, 0.5, 0.9, 1.0)
             self.selected = (1,1,0,1)
+        self.full_name = name
+        name = self.sanitise_name(name)
+
+        if '(' in name:
+            #remove the last brackets
+            name = name[:name.rfind('(')]
         self.name = name
         self.is_selected = False
+        self.last = None
 
         super(PlayerData, self).__init__( parent, pos, tr )
         bl = Point(0,self.margin.y)
@@ -25,26 +33,91 @@ class PlayerData(ui.UIElement):
         self.box = ui.Box(self, bl, tr, colour=self.unselected)
         #self.overlay = ui.Box(self.box, Point(0,0), Point(1,1), colour=(1,0,0,0.5), level=0.1)
         abs_height = self.box.absolute.size.y
-        scale = min(30, globals.text_manager.GetScale(abs_height*0.95))
-        text_height = globals.text_manager.GetSize(self.name, scale)
+        self.scale = min(30, globals.text_manager.GetScale(abs_height*0.95))
+        text_height = globals.text_manager.GetSize(self.name, self.scale)
         rel_height = text_height.y / float(abs_height)
-        text_margin = (1.0 - rel_height)/2.0
-        text_margin *= 0.9
-        print text_height, rel_height, text_margin, self.box.absolute.size
+        self.text_margin = (1.0 - rel_height)/2.0
+        self.text_margin *= 0.9
+        print text_height, rel_height, self.text_margin, self.box.absolute.size
+
+        #How much space do we need for the time?
+        
         self.text = ui.TextBox(self.box, 
-                               bl = Point(0,text_margin),
-                               tr = Point(1,1 - text_margin),
+                               bl = Point(0,self.text_margin),
+                               tr = Point(1 ,1 - self.text_margin),
                                text = self.name,
-                               scale = scale,
+                               scale = self.scale,
                                colour = self.selected,
-                               alignment = drawing.texture.TextAlignments.CENTRE)
+                               alignment = drawing.texture.TextAlignments.LEFT)
+
+        
+        self.time_text = None
+        self.time_str = None
+        self.clock_width = None 
+        self.set_time(initial_time)
+
+    def sanitise_name(self,name):
+        #If there's a part in double square brackets use that, otherwise use generic
+        if any((name.startswith(player) for player in self.players)):
+            return name
+        if '[[' in name:
+            hidden_name = name.split('[[')[1].split(']]')
+            full_name = ''.join(hidden_name).split('(')[0]
+            return full_name
+
+        return 'Mysterious Monster'
+
+
+    def add_time(self, t):
+        self.time_taken += t
+        
+        self.update_time()
+
+    def set_time(self, t):
+        self.time_taken = t
+        self.update_time()
+
+    def update_time(self):
+        seconds = self.time_taken / 1000
+        if seconds > 3600:
+            hours = seconds / 3600
+            minutes = (seconds / 60) % 60
+            seconds = seconds % 60
+            time_str = '%d:%02d:%02d' % (hours, minutes, seconds)
+        else:
+            minutes = (seconds / 60) % 60
+            seconds = seconds % 60
+            time_str = '%02d:%02d' % (minutes, seconds)
+
+        time_width = globals.text_manager.GetSize(time_str, self.scale).x
+        clock_width = time_width / float(self.box.absolute.size.x)
+        colour = self.unselected if self.is_selected else self.selected
+        if clock_width != self.clock_width:
+            #Probably gone up to hours. Sheesh!
+            if self.time_text:
+                self.time_text.Delete()
+            self.clock_width = clock_width
+            self.time_text = ui.TextBox(self.box,
+                                        bl = Point(1 - self.clock_width, self.text_margin),
+                                        tr = Point(1, 1 - self.text_margin),
+                                        text = time_str,
+                                        scale = self.scale,
+                                        colour = colour, 
+                                        alignment = drawing.texture.TextAlignments.RIGHT)
+            self.text_items = (self.text, self.time_text)
+            self.time_str = time_str
+        elif time_str != self.time_str:
+            #We can just update it in place
+            self.time_text.SetText(time_str, colour=colour)
+            self.time_str = time_str
 
     def set_gone(self):
         if self.is_selected:
             #This really shouldn't happen
             return
         self.box.SetColour( tuple([v*0.5 for v in self.unselected]) )
-        self.text.SetColour( tuple([v*0.5 for v in self.selected]) )
+        for item in self.text_items:
+            item.SetColour( tuple([v*0.5 for v in self.selected]) )
 
     def set_ready(self):
         self.box.bottom_left += Point(0.1,0)
@@ -55,16 +128,28 @@ class PlayerData(ui.UIElement):
     def select(self):
         self.is_selected = True
         self.box.SetColour(self.selected)
-        self.text.SetColour(self.unselected)
+        for item in self.text_items:
+            item.SetColour(self.unselected)
 
     def unselect(self):
         self.is_selected = False
         self.box.SetColour(self.unselected)
-        self.text.SetColour(self.selected)
+        for item in self.text_items:
+            item.SetColour(self.selected)
 
     def Destroy(self):
         self.box.Delete()
         #self.overlay.Delete()
+        
+class TurnTime(PlayerData):
+    unselected = (0.2, 1, 0.2, 1.0)
+    selected = (0, 0, 0.4, 1)
+
+    def sanitise_name(self, name):
+        return name
+
+    def __init__(self, parent, pos, tr):
+        super(TurnTime, self).__init__(parent, pos, tr, 'Turn Time:', 0)
         
 
 class GameView(ui.RootElement):
@@ -74,32 +159,43 @@ class GameView(ui.RootElement):
     def __init__(self):
         self.atlas = globals.atlas = drawing.texture.TextureAtlas('tiles_atlas_0.png','tiles_atlas.txt')
         self.game_over = False
+        self.last = None
         #pygame.mixer.music.load('music.ogg')
         #self.music_playing = False
         super(GameView,self).__init__(Point(0,0),globals.screen)
         #skip titles for development of the main game
         #self.box = ui.Box(self, Point(0.1,0.1), Point(0.8,0.8), colour=(1,0,0,1))
         self.items = []
+        self.turn_time = None
         self.chosen = None
         #self.set_items(['Fiz Gig','Tallin Erris','Brottor Strakeln','Cirefus'], 3, 1)
+        self.times = {}
 
     def hide(self):
         self.clear_items()
 
     def set_items(self, name_list, chosen, num_gone):
         self.clear_items()
-        display_len = len(name_list)
+        display_len = len(name_list) + 1
         if display_len < self.min_len:
             display_len = self.min_len
         top = 1.0 - self.margin.y
         bottom = self.margin.y
         height_per_name = (top - bottom) / display_len
 
-        for i,name in enumerate(name_list):
+        self.turn_time = TurnTime( self, 
+                                   Point(self.margin.x, top - height_per_name),
+                                   Point(1.0 - self.margin.x, top) )
+
+        for pos,name in enumerate(name_list):
+            i = pos + 1
+
+            t = self.times.get(name,0)
+                
             entry = PlayerData(self, 
                                Point(self.margin.x, top - (i+1)*height_per_name),
                                Point(1.0 - self.margin.x, top - i*height_per_name),
-                               name)
+                               name, initial_time=t)
             self.items.append(entry)
 
         if chosen >= len(self.items):
@@ -116,7 +212,10 @@ class GameView(ui.RootElement):
             self.items[i].set_ready()
         
     def clear_items(self):
+        if self.turn_time:
+            self.turn_time.Destroy()
         for item in self.items:
+            self.times[item.full_name] = item.time_taken
             item.Destroy()
         self.items = []
 
@@ -131,6 +230,24 @@ class GameView(ui.RootElement):
     def Update(self):
         if self.game_over:
             return
+
+        if self.last is None:
+            self.last = globals.time
+            return
+
+        elapsed = globals.time - self.last
+        self.last = globals.time
+            
+        if globals.paused:
+            return
+
+        try:
+            if self.chosen is not None:
+                self.items[self.chosen].add_time(elapsed)
+        except IndexError:
+            return
+        if self.turn_time:
+            self.turn_time.add_time(elapsed)
 
     def GameOver(self):
         self.game_over = True

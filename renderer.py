@@ -94,6 +94,7 @@ def main():
     server_thread.start()
     print "Server loop running in thread:", server_thread.name
 
+    globals.paused = False
     globals.game_view = view.GameView()
     globals.image_view = view.ImageView()
 

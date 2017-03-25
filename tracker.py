@@ -128,15 +128,7 @@ class Actor(object):
 players = 'Fiz Gig', 'Tallin Erris', 'Brottor Strakeln', 'Cirefus'
 
 def sanitise_name(name):
-    #If there's a part in double square brackets use that, otherwise use generic
-    if any((name.startswith(player) for player in players)):
-        return name
-    if '[[' in name:
-        hidden_name = name.split('[[')[1].split(']]')
-        full_name = ''.join(hidden_name).split('(')[0]
-        return full_name
-    
-    return 'Mysterious Monster'
+    return name
 
 class HeroData(object):
     def __init__(self, pid, count_ptr, actors):
@@ -330,7 +322,7 @@ def scan_initiative(pid, maps, bad_maps):
         total_estimates.add( (num_ptr, num) )
 
     if len(total_estimates) != 1:
-        print total_estimates
+        print 'a',total_estimates
         raise RuntimeError('Got more than one guess at the number of participants')
     count_ptr, count = total_estimates.pop()
     if len(actors) != count:
@@ -440,10 +432,18 @@ def choose_scene(name):
     except socket.error as e:
         print 'Error connecting'
 
+def exit_tracker():
+    if globals.game_process:
+        #Kill this bad boy
+        os.kill(globals.game_process.pid, 9)
+        globals.game_process.join()
+        globals.game_process = None
+    raise SystemExit()
+
 def create_menu():
     # Create the menu
     globals.game_process = None
-    menu = cursesmenu.CursesMenu("Pathfinder")
+    menu = cursesmenu.CursesMenu("Pathfinder", show_exit_option=False)
 
     # Create some items
     options = get_scene_list()
@@ -455,9 +455,13 @@ def create_menu():
     for item in options:
         menu.append_item(cursesmenu.items.FunctionItem(item, choose_scene, (item,)))
 
+    menu.append_item(cursesmenu.items.FunctionItem('Exit', exit_tracker))
+
     menu.show()
 
 if __name__ == '__main__':
+    #scan_main()
+    #raise SystemExit()
     mystdout = StdOutWrapper()
     sys.stdout = mystdout
     sys.stderr = mystdout
